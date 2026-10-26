@@ -132,7 +132,9 @@
       if (!rail.some((e) => e.key === active)) {
         active = (initialKey && rail.some((e) => e.key === initialKey) ? initialKey : rail[0]?.key) ?? '';
       }
-      if (searchItems) void tick().then(() => searchInput?.focus());
+      // Focus the search on a wide screen only: on a phone it would raise the keyboard
+      // over half the modal before the visitor asked to type.
+      if (searchItems && matchMedia('(min-width: 640px)').matches) void tick().then(() => searchInput?.focus());
     }
     if (!open && filterQuery) filterQuery = '';
     wasOpen = open;
@@ -287,14 +289,16 @@
       {@attach focusTrap()}
     >
       <!-- header -->
-      <div class="flex items-center gap-3 border-b border-border px-4 py-3">
+      <!-- On a phone the header actions leave the search no width, so the search wraps
+           onto its own full-width row under them. -->
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-3 sm:flex-nowrap">
         <h2 class="flex shrink-0 items-center gap-1.5 text-base font-semibold tracking-tight">
           {title}
           {#if titleHint}{@render titleHint()}{/if}
         </h2>
         {#if searchItems}
           <div
-            class="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-input px-3 focus-within:ring-2 focus-within:ring-ring"
+            class="order-last flex min-w-0 basis-full items-center gap-2 rounded-lg border border-input px-3 focus-within:ring-2 focus-within:ring-ring sm:order-none sm:flex-1 sm:basis-auto"
           >
             <Search class="size-4 shrink-0 text-muted-foreground" />
             <input
@@ -318,11 +322,12 @@
               </button>
             {/if}
           </div>
+          <div class="flex-1 sm:hidden"></div>
         {:else}
           <div class="flex-1"></div>
         {/if}
         {#if searchItems && headerAction}
-          <div class="mx-2 h-6 w-px shrink-0 bg-border" aria-hidden="true"></div>
+          <div class="mx-2 hidden h-6 w-px shrink-0 bg-border sm:block" aria-hidden="true"></div>
         {/if}
         {#if headerAction}{@render headerAction()}{/if}
         <button
@@ -379,6 +384,7 @@
              which section it is in. -->
         <section
           aria-labelledby={activeEntry && !searching ? railLabelId(activeEntry.key) : undefined}
+          aria-label={searching ? 'Matching filters' : undefined}
           class="min-w-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6"
         >
           {#if extra && !searching}<div class="mb-6">{@render extra()}</div>{/if}
@@ -408,14 +414,14 @@
           <button
             type="button"
             onclick={clearAll}
-            class="inline-flex h-11 items-center gap-1.5 rounded-lg px-3 -ml-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            ><X class="size-3.5" />Clear all</button
+            class="-ml-3 inline-flex h-11 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            ><X class="size-3.5" aria-hidden="true" />Clear all</button
           >
           <button
             type="button"
             onclick={runApply}
             disabled={applyDisabled || applyBusy}
-            class="inline-flex h-11 items-center gap-1.5 rounded-lg bg-brand px-6 text-sm font-semibold text-brand-foreground ring-2 ring-brand-ring ring-offset-2 ring-offset-background transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            class="inline-flex h-11 items-center gap-1.5 rounded-lg bg-brand px-6 text-sm font-semibold text-brand-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {#if applyLabel}
               {applyBusy ? 'Saving…' : applyLabel}

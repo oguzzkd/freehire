@@ -37,11 +37,13 @@ import (
 //     only when its own address code lies inside the board's area.
 //   - Both crawl hosts' IPs are refused by Cloudflare — a plain client and the proxies alike,
 //     and a Go Chrome-fingerprint client is shown the challenge — while the Scrapling
-//     service's impersonating fetcher is served from the crawl host's own IP (scraplingtier.go).
+//     service's impersonating fetcher is served. It is reached through the service's rotating
+//     proxy, because the site rate-limits per address (scraplingtier.go).
 type job104 struct {
 	http    HeaderJSONGetter
 	static  JSONGetter
 	limiter waiter
+	backoff time.Duration
 	codes   *job104Codes
 }
 
@@ -54,10 +56,23 @@ const (
 	job104MaxPage = 100
 )
 
-// job104RequestInterval paces every search request of a run through one limiter. The
-// platform publishes no limit; about one request a second is what its own frontend issues
-// while a visitor pages through results, and is courtesy toward a large site.
-const job104RequestInterval = 800 * time.Millisecond
+// job104RequestInterval paces every search request of ONE run through one limiter; the
+// scheduler runs several shards at once, each with its own. The platform rate-limits per
+// address — from the crawl host's own IP, five concurrent shards drew 429s at one request every
+// 0.8 s each and still did at 4 s — so the crawl leaves through the Scrapling service's
+// rotating proxy (scraplingtier.go), where each request has its own exit. The pace is then
+// courtesy toward the site rather than a limit we measured: five shards at 2 s are ~2.5
+// requests a second together, and a shard's ~1,000 pages fit its 4500 s budget.
+const job104RequestInterval = 2 * time.Second
+
+// job104RateLimitRetries and job104RateLimitBackoff retry a refused (403/429), failed (5xx) or
+// unanswered search, the wait
+// doubling from 5 s up to retryDelayCap. The Scrapling client retries nothing itself (see
+// newScraplingClient), so without this one 429 fails the whole board.
+const (
+	job104RateLimitRetries = 4
+	job104RateLimitBackoff = 5 * time.Second
+)
 
 // job104ExpBrackets are the search's experience brackets; each posting falls in exactly one
 // (their totals sum exactly to the unfiltered total), so they partition a slice.
@@ -70,6 +85,7 @@ func NewJob104(search HeaderJSONGetter, static JSONGetter) Source {
 		http:    search,
 		static:  static,
 		limiter: rate.NewLimiter(rate.Every(job104RequestInterval), 1),
+		backoff: job104RateLimitBackoff,
 		codes:   &job104Codes{},
 	}
 }
@@ -239,14 +255,17 @@ func (s job104) readPages(ctx context.Context, params url.Values, last int, add 
 }
 
 func (s job104) search(ctx context.Context, params url.Values, page int) (job104Response, error) {
-	if err := s.limiter.Wait(ctx); err != nil {
-		return job104Response{}, err
-	}
 	q := with104(params, "page", strconv.Itoa(page))
 	// Newest first, so a page boundary moves only when a posting is added ahead of it.
 	q.Set("order", "2")
 	var resp job104Response
-	err := s.http.GetJSONWithHeaders(ctx, job104SearchURL+"?"+q.Encode(), map[string]string{"Referer": job104Referer}, &resp)
+	err := retryWhile(ctx, job104RateLimitRetries, s.backoff, isRefusedOrTransient, func() error {
+		if err := s.limiter.Wait(ctx); err != nil {
+			return err
+		}
+		resp = job104Response{}
+		return s.http.GetJSONWithHeaders(ctx, job104SearchURL+"?"+q.Encode(), map[string]string{"Referer": job104Referer}, &resp)
+	})
 	if err != nil {
 		return resp, fmt.Errorf("job104: search %s page %d: %w", params.Encode(), page, err)
 	}
