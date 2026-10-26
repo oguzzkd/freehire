@@ -563,7 +563,13 @@ function charBudget(values: string[], maxChars: number): string[] {
 /** The most years of experience an entry-level-only profile should be offered, or null
  *  when any selected level is past junior — from middle up, years stated on a posting say
  *  little the level does not, and a bound would only drop real matches. Interns get one
- *  year rather than zero: "up to a year" is common wording on an internship. */
+ *  year rather than zero: "up to a year" is common wording on an internship.
+ *
+ *  The bound is applied WITHOUT experienceIncludeUnspecified. A posting that states no
+ *  requirement is not evidence of an entry-level one — the unstated postings an intern's
+ *  alert produced were the senior ones (freehire#3397 follow-up) — so the profile keeps
+ *  only the postings whose stated bound the candidate can meet. "Include postings that
+ *  don't state experience" stays a deliberate widening in the filter modal. */
 const ENTRY_EXPERIENCE_CAP: Partial<Record<string, number>> = { intern: 1, junior: 2 };
 
 function entryExperienceCap(seniorities: string[]): number | null {
@@ -604,15 +610,17 @@ export function filtersFromProfile(profile: UserProfile): JobFilters {
   if (levels.length && !SENIORITY_VALUES.every((v) => levels.includes(v))) {
     f.facets.seniority = seed(SENIORITY_VALUES.filter((v) => levels.includes(v)));
     f.seniorityIncludeUnspecified = true;
-    // The exclusion cannot reach a posting with no level, and for someone after an entry
-    // role that is most of what it lets through — an intern's alerts were 19 of 19
+    // The level modifier cannot reach a posting with no level, and for someone after an
+    // entry role that is most of what it lets through — an intern's alerts were 19 of 19
     // unlabelled, ten of them asking for 2-5 years (freehire#3397). The posting's stated
-    // years are the backstop, and the postings stating none stay in, for the same reason
-    // the unlabelled ones do.
+    // years are the backstop. Unlike the level modifier, this one does NOT opt into the
+    // postings that state no requirement: on those same alerts they were the senior ones,
+    // so an entry-level profile keeps only postings that state a bound the candidate can
+    // meet (freehire#3397 follow-up). "Include postings that don't state experience" stays
+    // a deliberate, user-ticked widening in the filter modal.
     const cap = entryExperienceCap(profile.seniorities);
     if (cap != null) {
       f.experienceYearsMax = cap;
-      f.experienceIncludeUnspecified = true;
     }
   }
   // Skills: wanted → include, avoided → exclude. Only stage an exclude for a token not

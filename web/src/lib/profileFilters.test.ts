@@ -29,8 +29,8 @@ function mkProfile(
 // filtersFromProfile is the pure reset-and-seed used by "Apply my profile": from a
 // clean slate it stages the user's profile specializations as `category` values, skills
 // as `skills` values, and (when present) the location block as the location facets.
-// Seniority preferences exclude unselected levels without requiring a classified level.
-// StagedFilters.applyProfile is a thin wrapper over it.
+// Seniority preferences include the selected levels and, through the modifier, the
+// postings with no classified level. StagedFilters.applyProfile is a thin wrapper over it.
 describe('filtersFromProfile', () => {
   // Included, not "everything else excluded": the filter UI then shows the levels the
   // user picked (freehire#3397). The unlabelled postings stay in through the modifier.
@@ -46,17 +46,34 @@ describe('filtersFromProfile', () => {
   // Excluding levels cannot reach a posting with no level, and for an intern that is
   // nearly everything they are sent (freehire#3397: 19 of 19 alerts unlabelled, ten
   // of them asking for 2-5 years). The experience bound is the backstop: it reads the
-  // years a posting states, and keeps the ones that state none.
-  it('bounds experience for an entry-level-only profile, keeping unstated postings', () => {
+  // years a posting states. It deliberately does NOT tick "include postings that don't
+  // state experience": the unstated postings on those same alerts were the senior ones,
+  // so that box stays a manual widening in the modal (freehire#3397 follow-up).
+  it('bounds experience for an entry-level-only profile, without opting into unstated postings', () => {
     const intern = filtersToParams(filtersFromProfile({ ...mkProfile([], []), seniorities: ['intern'] }));
     expect(intern.get('experience_years_max')).toBe('1');
-    expect(intern.get('experience_include_unspecified')).toBe('true');
+    expect(intern.has('experience_include_unspecified')).toBe(false);
 
     const junior = filtersToParams(
       filtersFromProfile({ ...mkProfile([], []), seniorities: ['intern', 'junior'] }),
     );
     expect(junior.get('experience_years_max')).toBe('2');
-    expect(junior.get('experience_include_unspecified')).toBe('true');
+    expect(junior.has('experience_include_unspecified')).toBe(false);
+  });
+
+  it('caps a junior-only profile at two years, without the include modifier', () => {
+    const p = filtersToParams(filtersFromProfile({ ...mkProfile([], []), seniorities: ['junior'] }));
+    expect(p.get('experience_years_max')).toBe('2');
+    expect(p.has('experience_include_unspecified')).toBe(false);
+  });
+
+  it('preserves the entry-level experience bound through the saved-search URL round trip', () => {
+    const profile = { ...mkProfile([], []), seniorities: ['intern'] };
+    const query = filtersToParams(filtersFromProfile(profile)).toString();
+    const restored = filtersToParams(filtersFromParams(new URLSearchParams(query)));
+
+    expect(restored.get('experience_years_max')).toBe('1');
+    expect(restored.has('experience_include_unspecified')).toBe(false);
   });
 
   it('does not bound experience once a level past junior is selected', () => {

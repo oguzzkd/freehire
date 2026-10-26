@@ -74,6 +74,22 @@ describe('syncProfileAlert', () => {
     expect(queries.every((p) => !p.has('seniority_exclude'))).toBe(true);
   });
 
+  it('bounds experience for an entry-level alert without opting into unstated postings', async () => {
+    const { syncProfileAlert } = await import('./profileAlertSync');
+    update.mockReset().mockResolvedValue(undefined);
+    profileStoreMock.profile = { ...staleProfile, seniorities: ['intern'] };
+    await syncProfileAlert();
+
+    expect(update).toHaveBeenCalledTimes(1);
+    const call = update.mock.calls[0];
+    expect(call?.[0]).toBe(42);
+    const query = new URLSearchParams(call?.[1]?.query);
+    expect(query.get('experience_years_max')).toBe('1');
+    expect(query.has('experience_include_unspecified')).toBe(false);
+    expect(query.get('seniority')).toBe('intern');
+    expect(query.get('seniority_include_unspecified')).toBe('true');
+  });
+
   it('does not start a second sync while the first is still in flight, and the second reads the profile as it stands when its turn comes', async () => {
     const { syncProfileAlert } = await import('./profileAlertSync');
     profileStoreMock.profile = staleProfile;
